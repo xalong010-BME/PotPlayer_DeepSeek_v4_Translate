@@ -29,7 +29,7 @@ string GetPasswordText() {
 
 // Global Variables
 string api_key = ""; // 全局变量，用于存储 API Key
-string selected_model = "deepseek-chat"; // Default model
+string selected_model = "deepseek-v4-flash"; // Default model
 string apiUrl = "https://api.deepseek.com/v1/chat/completions"; // DeepSeek API URL
 string UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)";
 int maxRetries = 3; // Maximum number of retries for translation
@@ -97,18 +97,30 @@ string UNICODE_RLE = "\u202B"; // For Right-to-Left languages
 
 // Function to estimate token count based on character length
 int EstimateTokenCount(const string &in text) {
-    // Rough estimation: average 4 characters per token
-    return int(float(text.length()) / 4);
+    int count = 0;
+    for (uint i = 0; i < text.length(); i++) {
+        uint c = uint(text[i]);
+        if (c >= 0x4E00 && c <= 0x9FFF) {
+            count += 2; // CJK characters: ~1.5-2 tokens
+        } else if (c >= 0x3000 && c <= 0x303F) {
+            count += 1; // CJK punctuation
+        } else if (c < 128) {
+            count += 1; // ASCII: ~0.25 tokens, aggregate
+        } else {
+            count += 1; // Other Unicode
+        }
+    }
+    return int(float(count) / 3) + 1;
 }
 
 // Function to get the model's maximum context length
 int GetModelMaxTokens(const string &in modelName) {
-    // Define maximum tokens for known models
-    if (modelName == "deepseek-chat") {
-        return 4096; // DeepSeek模型的默认最大token数
+    if (modelName == "deepseek-v4-flash") {
+        return 16384;
+    } else if (modelName == "deepseek-v4-pro") {
+        return 16384;
     } else {
-        // Default to a conservative limit
-        return 4096;
+        return 8192;
     }
 }
 
@@ -154,25 +166,47 @@ string Translate(string Text, string &in SrcLang, string &in DstLang) {
         subtitleHistory.removeAt(0);
     }
 
-    // Construct the prompt
-    string prompt = "You are a professional subtitle translator. Translate the following text into natural and fluent language. Use the provided context to optimize phrasing, but do not include it in the output. If needed, adjust sentence segmentation for readability, but avoid altering the original meaning or creating overly long sentences. For ambiguous terms, prioritize the meaning that best fits the context. Output only the translated result, without additional explanations or notes. **Ensure the translation does not contain any punctuation marks, as subtitles typically do not use them.** If the content violates safety standards, provide a compliant translation.";
+    // Construct system prompt
+    string systemPrompt = "You are a subtitle translator. Rules:\n"
+        + "1. Translate ONLY the text under 'Current subtitle'. Output ONLY the translation.\n"
+        + "2. Do NOT repeat, quote, or translate the context.\n"
+        + "3. Keep the translation natural and fluent.\n"
+        + "4. Do not add punctuation marks.\n"
+        + "5. Output nothing except the translated text.";
     if (!SrcLang.empty()) {
-        prompt += " Translate from " + SrcLang;
+        systemPrompt += "\n6. Source language: " + SrcLang + ".";
     }
-    prompt += " to " + DstLang + ". Use the provided context only to maintain coherence, but do not include the context in the output.\n";
-    if (!context.empty()) {
-        prompt += "Context:\n" + context + "\n";
-    }
-    prompt += "Subtitle to translate:\n" + Text;
+    systemPrompt += "\n7. Target language: " + DstLang + ".";
 
+    // Construct user message with minimal context
+    string userMsg = "";
+    if (!context.empty()) {
+        // Only include last 3 lines of context to avoid overwhelming the model
+        array<string> ctxLines = context.split("\n");
+        int start = int(ctxLines.length()) - 3;
+        if (start < 0) start = 0;
+        string recentCtx = "";
+        for (int j = start; j < int(ctxLines.length()); j++) {
+            if (!ctxLines[j].empty()) {
+                recentCtx += ctxLines[j] + " ";
+            }
+        }
+        userMsg = "Context: " + recentCtx.Trim() + "\n";
+    }
+    userMsg += "Current subtitle: " + Text;
 
     // JSON escape
-    string escapedPrompt = JsonEscape(prompt);
+    string escapedSystem = JsonEscape(systemPrompt);
+    string escapedUser = JsonEscape(userMsg);
 
     // Request data
     string requestData = "{\"model\":\"" + selected_model + "\","
-                         "\"messages\":[{\"role\":\"user\",\"content\":\"" + escapedPrompt + "\"}],"
-                         "\"max_tokens\":1000,\"temperature\":0}";
+                         "\"messages\":["
+                         + "{\"role\":\"system\",\"content\":\"" + escapedSystem + "\"},"
+                         + "{\"role\":\"user\",\"content\":\"" + escapedUser + "\"}"
+                         + "],"
+                         "\"max_tokens\":4096,\"temperature\":0.3,"
+                         "\"thinking\":{\"type\":\"disabled\"}}";
 
     string headers = "Authorization: Bearer " + api_key + "\nContent-Type: application/json";
 
@@ -202,11 +236,22 @@ string Translate(string Text, string &in SrcLang, string &in DstLang) {
         if (choices.isArray() && choices[0]["message"]["content"].isString()) {
             string translatedText = choices[0]["message"]["content"].asString();
 
-            // 处理多行翻译结果：只取最后一行
-            translatedText = translatedText.Trim(); // 去除多余的空格
+            // 检查 finish_reason
+            string finishReason = choices[0]["finish_reason"].asString();
+            if (finishReason == "length") {
+                HostPrintUTF8("{$CP0=Warning: Translation truncated due to token limit.$}\n");
+            } else if (finishReason == "content_filter") {
+                HostPrintUTF8("{$CP0=Warning: Translation filtered by content policy.$}\n");
+                retryCount++;
+                HostSleep(retryDelay);
+                continue;
+            }
+
+            // 处理多行翻译结果：合并为一行
+            translatedText = translatedText.Trim();
             if (translatedText.find("\n") != -1) {
-                array<string> lines = translatedText.split("\n");
-                translatedText = lines[lines.length() - 1].Trim(); // 取最后一行
+                translatedText.replace("\n", " ");
+                translatedText = translatedText.Trim();
             }
 
             // 处理 RTL 语言
