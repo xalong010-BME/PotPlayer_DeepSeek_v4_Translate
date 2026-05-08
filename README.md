@@ -8,11 +8,16 @@
 
 ## 📖 简介 / Introduction
 
-本仓库是基于 [Felix3322/PotPlayer_Chatgpt_Translate](https://github.com/Felix3322/PotPlayer_Chatgpt_Translate) 修改而来，专为 PotPlayer 设计的实时字幕翻译插件，适配 **DeepSeek API**。通过集成 DeepSeek 的强大文本生成能力，该插件能够在观看视频时实时翻译字幕，打破语言障碍，提升您的观影体验。
+本仓库是基于（https://github.com/Liu8Can/PotPlayer_DeepSeek_Translate）的分支。 [Felix3322/PotPlayer_Chatgpt_Translate](https://github.com/Felix3322/PotPlayer_Chatgpt_Translate) 修改而来，专为 PotPlayer 设计的实时字幕翻译插件，适配 **DeepSeek API**。通过集成 DeepSeek 的强大文本生成能力，该插件能够在观看视频时实时翻译字幕，打破语言障碍，提升您的观影体验。
 
 This repository is a modified version of [Felix3322/PotPlayer_Chatgpt_Translate](https://github.com/Felix3322/PotPlayer_Chatgpt_Translate), designed for PotPlayer with support for **DeepSeek API**. By leveraging DeepSeek's powerful text generation capabilities, this plugin enables real-time subtitle translation while watching videos, breaking language barriers and enhancing your viewing experience.
 
 ---
+
+## 主要修改
+1、修改为调用deepseek v4
+2、修改了翻译结果的处理逻辑
+3、使用xiaomi mimo v2.5 pro 辅助修改
 
 ## 🚀 功能特性 / Features
 
